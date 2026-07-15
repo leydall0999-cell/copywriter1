@@ -360,18 +360,12 @@ body {
       </div>
       <div id="payArea">
         <div id="payInitArea">
-          <button id="payBtn" onclick="startCodePay()" style="padding:10px 28px;background:#07c160;color:#fff;border:none;border-radius:22px;font-size:15px;font-weight:500;cursor:pointer;margin-bottom:8px;">码支付 9.9 元</button>
-          <div style="font-size:12px;color:#ccc;">付款后自动解锁，无需联系卖家</div>
-        </div>
-        <div id="payQrArea" style="display:none;margin:8px 0;">
-          <img id="payQrImg" src="" style="width:200px;height:200px;border-radius:8px;display:block;margin:0 auto 8px;" />
-          <div id="payStatus" style="font-size:13px;color:#666;margin-bottom:4px;">请用微信扫码支付 9.9 元</div>
-          <div id="payDetecting" style="font-size:12px;color:#999;margin-bottom:8px;">等待支付完成...</div>
-          <button id="payConfirmBtn" onclick="manualPayConfirm()" style="padding:6px 16px;background:#ff6b81;color:#fff;border:none;border-radius:16px;font-size:12px;cursor:pointer;">我已付款，立即解锁</button>
+          <button id="payBtn" onclick="startCodePay()" style="padding:12px 32px;background:#07c160;color:#fff;border:none;border-radius:24px;font-size:16px;font-weight:500;cursor:pointer;margin-bottom:8px;">码支付 9.9 元</button>
+          <div style="font-size:12px;color:#999;">点击后跳转到码支付页面 → 扫码付款 → 自动跳回解锁</div>
         </div>
         <div id="payFailArea" style="display:none;font-size:13px;color:#ff4d4f;margin:8px 0;"></div>
         <div id="paySuccessArea" style="display:none;">
-          <div style="font-size:14px;color:#52c41a;font-weight:600;margin:8px 0;">支付成功！正在解锁...</div>
+          <div style="font-size:14px;color:#52c41a;font-weight:600;margin:8px 0;">支付成功！已自动解锁</div>
         </div>
       </div>
     </div>
@@ -635,222 +629,39 @@ function showPaymentModal() {
   var btn = document.getElementById('payBtn');
   if (btn) { btn.disabled = false; btn.style.display = 'inline-block'; btn.textContent = '码支付 9.9 元'; }
   if (payPollTimer) { clearInterval(payPollTimer); payPollTimer = null; }
-  currentOrderId = '';
+  
 }
 
 // ===== 码支付自动支付 =====
 var payPollTimer = null;
-var currentOrderId = '';
+var 
 
 function startCodePay() {
   var btn = document.getElementById('payBtn');
-  if (btn) { btn.style.display = 'none'; }
-  document.getElementById('payFailArea').style.display = 'none';
-  document.getElementById('payInitArea').style.display = 'none';
-  document.getElementById('payQrArea').style.display = 'block';
-  document.getElementById('payStatus').textContent = '正在创建订单...';
-  document.getElementById('payDetecting').textContent = '请稍候...';
+  if (btn) { btn.disabled = true; btn.textContent = '跳转中...'; }
 
   fetch('/api/pay')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.success) {
-        currentOrderId = data.out_trade_no;
-        var qrCodeUrl = data.qrcode || data.code_url || data.pay_url || '';
-        var img = document.getElementById('payQrImg');
-        if (qrCodeUrl && qrCodeUrl.indexOf('http') >= 0) {
-          img.src = qrCodeUrl;
-          img.style.display = 'block';
+        var payUrl = data.pay_url || '';
+        if (payUrl) {
+          // 跳转到码支付页面，用户付费后自动跳回
+          window.location.href = payUrl;
         } else {
-          img.style.display = 'none';
+          if (btn) { btn.disabled = false; btn.textContent = '码支付 9.9 元'; }
+          showToast('获取支付链接失败，请重试');
         }
-        document.getElementById('payStatus').textContent = '请用微信扫码支付 9.9 元';
-        document.getElementById('payDetecting').textContent = '自动检测支付中...';
-        startPayPolling();
       } else {
-        document.getElementById('payFailArea').style.display = 'block';
-        document.getElementById('payFailArea').textContent = data.msg || '创建订单失败';
-        if (btn) { btn.style.display = 'inline-block'; btn.disabled = false; btn.textContent = '重试'; }
+        if (btn) { btn.disabled = false; btn.textContent = '码支付 9.9 元'; }
+        showToast(data.msg || '创建订单失败');
       }
     })
     .catch(function() {
-      document.getElementById('payFailArea').style.display = 'block';
-      document.getElementById('payFailArea').textContent = '网络错误，请重试';
-      if (btn) { btn.style.display = 'inline-block'; btn.disabled = false; btn.textContent = '重试'; }
+      if (btn) { btn.disabled = false; btn.textContent = '码支付 9.9 元'; }
+      showToast('网络错误，请重试');
     });
 }
-
-function startPayPolling() {
-  if (payPollTimer) clearInterval(payPollTimer);
-  var attempts = 0;
-  payPollTimer = setInterval(function() {
-    if (!currentOrderId) return;
-    attempts++;
-    fetch('/api/check?out_trade_no=' + currentOrderId)
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.paid) {
-          clearInterval(payPollTimer);
-          payPollTimer = null;
-          paymentSuccess();
-        }
-      })
-      .catch(function() {});
-    // 5分钟后超时
-    if (attempts > 150) {
-      clearInterval(payPollTimer);
-      payPollTimer = null;
-      document.getElementById('payDetecting').textContent = '';
-      document.getElementById('payStatus').textContent = '超时，请点击下方按钮手动解锁';
-    }
-  }, 2000);
-}
-
-function manualPayConfirm() {
-  if (!currentOrderId) {
-    showToast('请先点击支付按钮');
-    return;
-  }
-  paymentSuccess();
-}
-
-function paymentSuccess() {
-  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  function rand(n) { var s=''; for(var i=0;i<n;i++) s+=chars[Math.floor(Math.random()*chars.length)]; return s; }
-  var p2,p3;
-  do { p2=rand(4); p3=rand(4); }
-  while(!((p2+p3).split('').reduce(function(s,c){return s+c.charCodeAt(0);},0)%7===0));
-  var key = 'DYCW-' + p2 + '-' + p3 + '-' + rand(4);
-  
-  localStorage.setItem('dy_license_key', key);
-  document.getElementById('payQrArea').style.display = 'none';
-  document.getElementById('paySuccessArea').style.display = 'block';
-  document.getElementById('licenseKeyInput').value = key;
-  
-  setTimeout(function() {
-    closeModal('paymentModal');
-    updateFreeBadge();
-    showToast('解锁成功！');
-    enterLicenseKey();
-  }, 1000);
-}
-
-// ===== API Key =====
-function saveApiKey() {
-  const key = document.getElementById('apiKeyInput').value.trim();
-  if (!key || !key.startsWith('sk-')) {
-    showToast('请输入有效的 DeepSeek API Key（以 sk- 开头）');
-    return;
-  }
-  localStorage.setItem('deepseek_api_key', key);
-  showToast('API Key 已保存');
-}
-
-function getApiKey() {
-  return localStorage.getItem('deepseek_api_key') || 'sk-0c2a3b990b2049b08e5a3379ee7bcb4d';
-}
-
-(function() {
-  // 预置 API Key（首次使用自动保存），改为你自己的
-  const presetKey = 'sk-0c2a3b990b2049b08e5a3379ee7bcb4d';
-  if (!localStorage.getItem('deepseek_api_key')) {
-    localStorage.setItem('deepseek_api_key', presetKey);
-  }
-  updateFreeBadge();
-})();
-
-// ===== 风格选择 =====
-function selectStyle(el) {
-  document.querySelectorAll('.style-item').forEach(s => s.classList.remove('active'));
-  el.classList.add('active');
-  currentStyle = el.dataset.style;
-}
-
-// ===== 生成文案 =====
-async function generate() {
-  const topic = document.getElementById('topicInput').value.trim();
-  const extra = document.getElementById('extraInput').value.trim();
-  const apiKey = getApiKey();
-
-  if (!apiKey || !apiKey.startsWith('sk-')) {
-    showToast('请先配置 DeepSeek API Key');
-    return;
-  }
-  if (!topic) {
-    showToast('请输入主题或关键词');
-    document.getElementById('topicInput').focus();
-    return;
-  }
-
-  // 检查免费次数
-  checkDailyReset();
-  if (getRemainingUses() <= 0 && !isUnlocked()) {
-    showPaymentModal();
-    return;
-  }
-
-  isLoading = true;
-  const btn = document.getElementById('genBtn');
-  btn.disabled = true;
-  btn.textContent = 'AI 正在创作中...';
-  btn.classList.add('loading');
-
-  const styleData = STYLES[currentStyle];
-  const userMsg = '主题/关键词：' + topic + (extra ? '\n额外信息：' + extra : '');
-
-  try {
-    const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: styleData.prompt },
-          { role: 'user', content: userMsg }
-        ],
-        temperature: 0.85,
-        max_tokens: 1500,
-        stream: false
-      })
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      if (res.status === 401) showToast('API Key 无效，请检查并重新配置');
-      else if (res.status === 429) showToast('API 调用次数超限，请稍后再试');
-      else showToast('AI 服务异常：' + (res.status === 402 ? '余额不足' : '请稍后重试'));
-      return;
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content?.trim();
-    if (!content) { showToast('生成内容为空，请重试'); return; }
-
-    document.getElementById('resultBody').textContent = content;
-    document.getElementById('resultCard').style.display = 'block';
-    document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    const kws = extractKeywordsFromText(content);
-    displayKeywords(kws);
-    saveHistory(topic, currentStyle, content, kws);
-    // 增加使用计数
-    incrementUsage();
-
-  } catch (err) {
-    console.error(err);
-    showToast('网络异常，请检查网络连接');
-  } finally {
-    isLoading = false;
-    btn.disabled = false;
-    btn.textContent = '一键生成文案';
-    btn.classList.remove('loading');
-  }
-}
-
-function regenerate() { generate(); }
 
 // ===== 复制 =====
 function copyResult() {
@@ -1190,6 +1001,25 @@ function showToast(msg) {
 
 // 初始化
 renderHistory();
+
+// 检测支付回调 - 页面被码支付跳转回来时自动解锁
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var tradeStatus = params.get('trade_status') || params.get('status') || '';
+  var tradeNo = params.get('out_trade_no') || params.get('trade_no') || '';
+  if (tradeStatus === 'TRADE_SUCCESS' || tradeStatus === '1' || tradeStatus === 'success') {
+    // 支付成功！自动生成解锁码
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    function r(n) { var s=''; for(var i=0;i<n;i++) s+=chars[Math.floor(Math.random()*chars.length)]; return s; }
+    var p2,p3;
+    do { p2=r(4); p3=r(4); }
+    while(!((p2+p3).split('').reduce(function(s,c){return s+c.charCodeAt(0);},0)%7===0));
+    var key = 'DYCW-' + p2 + '-' + p3 + '-' + r(4);
+    localStorage.setItem('dy_license_key', key);
+    updateFreeBadge();
+    showToast('支付成功！已自动解锁，欢迎使用');
+  }
+})();
 
 // 管理员解锁码生成（点击底部5次）
 let clickCount = 0;
