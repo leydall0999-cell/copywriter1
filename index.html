@@ -429,6 +429,41 @@ const STYLE_NAMES = { zhongcao: '种草推荐', ceping: '专业测评', ganhuo: 
 
 let currentStyle = 'zhongcao';
 let isLoading = false;
+const STYLE_NAMES = { zhongcao: '种草推荐', ceping: '专业测评', ganhuo: '干货分享', qinggan: '情感故事', gaoxiao: '搞笑段子' };
+
+// ===== API Key =====
+function saveApiKey() {
+  var key = document.getElementById('apiKeyInput').value.trim();
+  if (!key || !key.startsWith('sk-')) {
+    showToast('请输入有效的 DeepSeek API Key（以 sk- 开头）');
+    return;
+  }
+  localStorage.setItem('deepseek_api_key', key);
+  showToast('API Key 已保存');
+}
+
+function getApiKey() {
+  return localStorage.getItem('deepseek_api_key') || '';
+}
+
+// 预设 Key（首次使用自动保存）
+(function() {
+  // 用你自己的 DeepSeek API Key 替换下面这行
+  var presetKey = 'sk-0c2a3b990b2049b08e5a3379ee7bcb4d';
+  if (!localStorage.getItem('deepseek_api_key')) {
+    localStorage.setItem('deepseek_api_key', presetKey);
+  }
+  updateFreeBadge();
+})();
+
+// ===== 风格选择 =====
+function selectStyle(el) {
+  document.querySelectorAll('.style-item').forEach(function(s) { s.classList.remove('active'); });
+  el.classList.add('active');
+  currentStyle = el.dataset.style;
+}
+
+
 
 // ===== 使用次数 & 看广告 =====
 const DAILY_FREE = 3;
@@ -636,11 +671,14 @@ function showPaymentModal() {
 var payPollTimer = null;
 var 
 
+// API 地址（改成你的 Vercel 地址）
+const API_BASE = 'https://web-three-blue-97.vercel.app';
+
 function startCodePay() {
   var btn = document.getElementById('payBtn');
   if (btn) { btn.disabled = true; btn.textContent = '跳转中...'; }
 
-  fetch('/api/pay')
+  fetch(API_BASE + '/api/pay')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.success) {
@@ -663,7 +701,88 @@ function startCodePay() {
     });
 }
 
-// ===== 复制 =====
+// ===== 生成文案 =====
+async function generate() {
+  var topic = document.getElementById('topicInput').value.trim();
+  var extra = document.getElementById('extraInput').value.trim();
+  var apiKey = getApiKey();
+
+  if (!apiKey || !apiKey.startsWith('sk-')) {
+    showToast('请先配置 DeepSeek API Key');
+    return;
+  }
+  if (!topic) {
+    showToast('请输入主题或关键词');
+    document.getElementById('topicInput').focus();
+    return;
+  }
+
+  // 检查免费次数
+  checkDailyReset();
+  if (getRemainingUses() <= 0 && !isUnlocked()) {
+    showPaymentModal();
+    return;
+  }
+
+  isLoading = true;
+  var btn = document.getElementById('genBtn');
+  btn.disabled = true;
+  btn.textContent = 'AI 正在创作中...';
+  btn.classList.add('loading');
+
+  var styleData = STYLES[currentStyle];
+  var userMsg = '主题/关键词：' + topic + (extra ? '\n额外信息：' + extra : '');
+
+  try {
+    var res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: styleData.prompt },
+          { role: 'user', content: userMsg }
+        ],
+        temperature: 0.85,
+        max_tokens: 1500,
+        stream: false
+      })
+    });
+
+    if (!res.ok) {
+      var err = await res.text();
+      if (res.status === 401) showToast('API Key 无效，请检查');
+      else if (res.status === 429) showToast('API 调用次数超限');
+      else showToast('AI 服务异常：' + (res.status === 402 ? '余额不足' : '请稍后重试'));
+      return;
+    }
+
+    var data = await res.json();
+    var content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) { showToast('生成内容为空，请重试'); return; }
+
+    document.getElementById('resultBody').textContent = content;
+    document.getElementById('resultCard').style.display = 'block';
+    document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    var kws = extractKeywordsFromText(content);
+    displayKeywords(kws);
+    saveHistory(topic, currentStyle, content, kws);
+    incrementUsage();
+
+  } catch (err) {
+    showToast('网络异常，请检查网络连接');
+  } finally {
+    isLoading = false;
+    btn.disabled = false;
+    btn.textContent = '一键生成文案';
+    btn.classList.remove('loading');
+  }
+}
+
+function regenerate() { generate(); }
+
+
 function copyResult() {
   const text = document.getElementById('resultBody').textContent;
   if (!text) return;
